@@ -1,0 +1,24 @@
+{
+  "name": "moneycontrol-index-fetch",
+  "version": "1.0.0",
+  "description": "Auto fetch and update Google Sheets with Moneycontrol Index data",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "axios": "^1.13.2",
+    "cheerio": "^1.1.2",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^4.21.2",
+    "googleapis": "^118.0.0",
+    "json2csv": "^6.0.0-alpha.2",
+    "node-cron": "^4.2.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
