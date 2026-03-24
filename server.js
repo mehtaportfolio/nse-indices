@@ -13,7 +13,9 @@ app.use(cors({
 }));
 
 // Health check endpoint
-app.get("/", (req, res) => res.send("NSE Cron Service is running ✅"));
+app.get("/health", (req, res) => {
+  res.status(200).json({ status: "ok" });
+});
 
 // Manual trigger endpoint
 app.post("/restart", (req, res) => {
