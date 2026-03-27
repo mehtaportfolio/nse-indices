@@ -1,8 +1,13 @@
 const { google } = require("googleapis");
 const axios = require("axios");
+const { wrapper } = require("axios-cookiejar-support");
+const { CookieJar } = require("tough-cookie");
 require("dotenv").config();
 
-console.log("⏳ NSE Index Updater Loaded...");
+const jar = new CookieJar();
+const client = wrapper(axios.create({ jar }));
+
+console.log("⏳ NSE Index Updater (Lightweight NSE) Loaded...");
 
 // Allowed symbols
 const INDEX_MAP = {
@@ -10,13 +15,10 @@ const INDEX_MAP = {
   "NIFTY SMALLCAP 250": "NIFTY SMLCAP 250",
 };
 
-// 🔐 Fix private key formatting
-const privateKey = process.env.GS_PRIVATE_KEY?.replace(/\\n/g, "\n");
-
 const auth = new google.auth.GoogleAuth({
   credentials: {
     client_email: process.env.GS_CLIENT_EMAIL,
-    private_key: privateKey,
+    private_key: process.env.GS_PRIVATE_KEY.replace(/\\n/g, "\n"),
   },
   scopes: ["https://www.googleapis.com/auth/spreadsheets"],
 });
@@ -25,14 +27,54 @@ const sheets = google.sheets({ version: "v4", auth });
 
 // ------- Fetch NSE ------
 async function fetchIndices() {
-  try {
-    console.log("📡 Fetching Index Data from NSE...");
+  const BASE_URL = "https://www.nseindia.com";
+  const MARKET_PAGE = "https://www.nseindia.com/market-data/live-market-indices";
+  const API_URL = "https://www.nseindia.com/api/allIndices";
 
-    const res = await axios.get("https://www.nseindia.com/api/allIndices", {
+  const HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "sec-ch-ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+  };
+
+  try {
+    console.log("📡 Initializing session with NSE...");
+
+    // 1. Visit homepage to get initial cookies
+    await client.get(BASE_URL, { headers: HEADERS });
+    console.log("✅ Homepage visited.");
+
+    // 2. Visit market page to solidify session
+    await client.get(MARKET_PAGE, {
       headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-        Accept: "application/json",
+        ...HEADERS,
+        "Referer": BASE_URL,
+        "Sec-Fetch-Site": "same-origin",
+      },
+    });
+    console.log("✅ Market page visited. Waiting 2s...");
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    // 3. Fetch API with full cookie jar
+    const res = await client.get(API_URL, {
+      headers: {
+        ...HEADERS,
+        "Accept": "application/json, text/plain, */*",
+        "Referer": MARKET_PAGE,
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
+        "X-Requested-With": "XMLHttpRequest",
       },
     });
 
@@ -40,16 +82,18 @@ async function fetchIndices() {
 
     for (const [display, api] of Object.entries(INDEX_MAP)) {
       const data = res.data.data.find((d) => d.indexSymbol === api);
-
       output[display] = data
         ? { cmp: data.last, lcp: data.previousClose }
         : { cmp: null, lcp: null };
     }
 
-    console.log("📦 Data:", output);
+    console.log("📦 Data fetched successfully.");
     return output;
   } catch (err) {
     console.error("❌ Error fetching NSE:", err.message);
+    if (err.response) {
+      console.error("Status:", err.response.status);
+    }
     return {};
   }
 }
@@ -59,157 +103,119 @@ async function updateSheet(indexData) {
   const SHEET_ID = process.env.GOOGLE_SHEET_ID;
   const SHEET_NAME = "Stocks";
 
-  if (!SHEET_ID) {
-    console.error("❌ Missing GOOGLE_SHEET_ID");
+  console.log("📄 Reading Sheet...");
+
+  // Get sheet meta to find sheetId
+  const meta = await sheets.spreadsheets.get({
+    spreadsheetId: SHEET_ID,
+  });
+
+  const sheetInfo = meta.data.sheets.find(
+    (s) => s.properties.title === SHEET_NAME
+  );
+
+  if (!sheetInfo) {
+    console.log("❌ Sheet not found.");
     return;
   }
 
-  console.log("🔐 Using Sheet ID:", SHEET_ID);
-  console.log("📄 Reading Sheet...");
+  const sheetId = sheetInfo.properties.sheetId;
 
-  try {
-    // Get sheet meta
-    const meta = await sheets.spreadsheets.get({
-      spreadsheetId: SHEET_ID,
-    });
+  // Get existing rows
+  const getRes = await sheets.spreadsheets.values.get({
+    spreadsheetId: SHEET_ID,
+    range: `${SHEET_NAME}!A1:Z200`,
+  });
 
-    const sheetInfo = meta.data.sheets.find(
-      (s) => s.properties.title === SHEET_NAME
-    );
+  const rows = getRes.data.values || [];
+  const headers = rows[0]?.map(h => h.toLowerCase().trim()) || [];
 
-    if (!sheetInfo) {
-      console.log("❌ Sheet not found.");
-      return;
-    }
+  const symbolCol = headers.indexOf("symbol");
+  const cmpCol = headers.indexOf("cmp");
+  const lcpCol = headers.indexOf("lcp");
 
-    const sheetId = sheetInfo.properties.sheetId;
-
-    // Get existing rows
-    const getRes = await sheets.spreadsheets.values.get({
-      spreadsheetId: SHEET_ID,
-      range: `${SHEET_NAME}!A1:Z200`,
-    });
-
-    const rows = getRes.data.values || [];
-
-    console.log("📊 Total rows:", rows.length);
-
-    if (rows.length === 0) {
-      console.error("❌ No data found in sheet");
-      return;
-    }
-
-    const headers = rows[0];
-
-    console.log("🧾 Headers:", headers);
-
-    // ✅ Normalize headers
-    const normalizedHeaders = headers.map((h) =>
-      h?.trim().toLowerCase()
-    );
-
-    const symbolCol = normalizedHeaders.indexOf("symbol");
-    const cmpCol = normalizedHeaders.indexOf("cmp");
-    const lcpCol = normalizedHeaders.indexOf("lcp");
-
-    console.log("📍 Column Indexes:", {
-      symbolCol,
-      cmpCol,
-      lcpCol,
-    });
-
-    // ❌ Fail fast if columns not found
-    if (symbolCol === -1 || cmpCol === -1 || lcpCol === -1) {
-      console.error("❌ Column mismatch!", { headers });
-      return;
-    }
-
-    const requests = [];
-
-    rows.forEach((row, rowIndex) => {
-      if (rowIndex === 0) return;
-
-      console.log("➡ Row:", row);
-
-      const symbol = row[symbolCol]?.trim().toUpperCase();
-
-      console.log("➡ Extracted symbol:", symbol);
-
-      if (indexData[symbol]) {
-        console.log(`🔧 Updating ${symbol} at row ${rowIndex + 1}`);
-
-        // CMP update
-        requests.push({
-          updateCells: {
-            range: {
-              sheetId,
-              startRowIndex: rowIndex,
-              endRowIndex: rowIndex + 1,
-              startColumnIndex: cmpCol,
-              endColumnIndex: cmpCol + 1,
-            },
-            rows: [
-              {
-                values: [
-                  {
-                    userEnteredValue: {
-                      numberValue: indexData[symbol].cmp,
-                    },
-                  },
-                ],
-              },
-            ],
-            fields: "userEnteredValue",
-          },
-        });
-
-        // LCP update
-        requests.push({
-          updateCells: {
-            range: {
-              sheetId,
-              startRowIndex: rowIndex,
-              endRowIndex: rowIndex + 1,
-              startColumnIndex: lcpCol,
-              endColumnIndex: lcpCol + 1,
-            },
-            rows: [
-              {
-                values: [
-                  {
-                    userEnteredValue: {
-                      numberValue: indexData[symbol].lcp,
-                    },
-                  },
-                ],
-              },
-            ],
-            fields: "userEnteredValue",
-          },
-        });
-      }
-    });
-
-    if (requests.length === 0) {
-      console.log("⚠ No matching rows found.");
-      return;
-    }
-
-    console.log("✍ Updating Google Sheet...");
-
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: SHEET_ID,
-      requestBody: { requests },
-    });
-
-    console.log("✅ Sheet Update Complete.");
-  } catch (err) {
-    console.error("❌ Sheet update error:", err.message);
+  if (symbolCol === -1 || cmpCol === -1 || lcpCol === -1) {
+    console.log("❌ Missing required headers (symbol, cmp, or lcp) in row 1.");
+    console.log("Current headers found:", rows[0]);
+    return;
   }
+
+  const requests = [];
+
+  rows.forEach((row, rowIndex) => {
+    if (rowIndex === 0) return;
+
+    const symbol = row[symbolCol]?.trim().toUpperCase();
+
+    if (indexData[symbol]) {
+      console.log(`🔧 Match found! Updating ${symbol} at row ${rowIndex + 1}`);
+
+      requests.push({
+        updateCells: {
+          range: {
+            sheetId,
+            startRowIndex: rowIndex,
+            endRowIndex: rowIndex + 1,
+            startColumnIndex: cmpCol,
+            endColumnIndex: cmpCol + 1,
+          },
+          rows: [
+            {
+              values: [{ userEnteredValue: { numberValue: indexData[symbol].cmp } }],
+            },
+          ],
+          fields: "userEnteredValue",
+        },
+      });
+
+      requests.push({
+        updateCells: {
+          range: {
+            sheetId,
+            startRowIndex: rowIndex,
+            endRowIndex: rowIndex + 1,
+            startColumnIndex: lcpCol,
+            endColumnIndex: lcpCol + 1,
+          },
+          rows: [
+            {
+              values: [{ userEnteredValue: { numberValue: indexData[symbol].lcp } }],
+            },
+          ],
+          fields: "userEnteredValue",
+        },
+      });
+    }
+  });
+
+  if (requests.length === 0) return console.log("⚠ No matching rows found.");
+
+  console.log("✍ Updating Google Sheet...");
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: SHEET_ID,
+    requestBody: { requests },
+  });
+
+  console.log("✅ Sheet Update Complete.");
 }
 
 // ------- RUN ------
-(async () => {
-  const data = await fetchIndices();
-  await updateSheet(data);
-})();
+async function runJob() {
+  try {
+    console.log("🚀 Running NSE update job...");
+
+    const data = await fetchIndices();
+    await updateSheet(data);
+
+    console.log("✅ Job completed.\n");
+  } catch (err) {
+    console.error("❌ Job failed:", err.message);
+  }
+}
+
+// Run immediately
+runJob();
+
+// Run every 300 seconds
+setInterval(runJob, 300000);
