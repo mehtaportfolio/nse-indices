@@ -1,8 +1,13 @@
 const { google } = require("googleapis");
 const axios = require("axios");
+const { wrapper } = require("axios-cookiejar-support");
+const { CookieJar } = require("tough-cookie");
 require("dotenv").config();
 
-console.log("⏳ NSE Index Updater Loaded...");
+const jar = new CookieJar();
+const client = wrapper(axios.create({ jar }));
+
+console.log("⏳ NSE Index Updater (Lightweight NSE) Loaded...");
 
 // Allowed symbols
 const INDEX_MAP = {
@@ -22,14 +27,54 @@ const sheets = google.sheets({ version: "v4", auth });
 
 // ------- Fetch NSE ------
 async function fetchIndices() {
-  try {
-    console.log("📡 Fetching Index Data from NSE...");
+  const BASE_URL = "https://www.nseindia.com";
+  const MARKET_PAGE = "https://www.nseindia.com/market-data/live-market-indices";
+  const API_URL = "https://www.nseindia.com/api/allIndices";
 
-    const res = await axios.get("https://www.nseindia.com/api/allIndices", {
+  const HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "sec-ch-ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+  };
+
+  try {
+    console.log("📡 Initializing session with NSE...");
+
+    // 1. Visit homepage to get initial cookies
+    await client.get(BASE_URL, { headers: HEADERS });
+    console.log("✅ Homepage visited.");
+
+    // 2. Visit market page to solidify session
+    await client.get(MARKET_PAGE, {
       headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-        Accept: "application/json",
+        ...HEADERS,
+        "Referer": BASE_URL,
+        "Sec-Fetch-Site": "same-origin",
+      },
+    });
+    console.log("✅ Market page visited. Waiting 2s...");
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    // 3. Fetch API with full cookie jar
+    const res = await client.get(API_URL, {
+      headers: {
+        ...HEADERS,
+        "Accept": "application/json, text/plain, */*",
+        "Referer": MARKET_PAGE,
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
+        "X-Requested-With": "XMLHttpRequest",
       },
     });
 
@@ -42,10 +87,13 @@ async function fetchIndices() {
         : { cmp: null, lcp: null };
     }
 
-    console.log("📦 Data:", output);
+    console.log("📦 Data fetched successfully.");
     return output;
   } catch (err) {
     console.error("❌ Error fetching NSE:", err.message);
+    if (err.response) {
+      console.error("Status:", err.response.status);
+    }
     return {};
   }
 }
@@ -80,11 +128,17 @@ async function updateSheet(indexData) {
   });
 
   const rows = getRes.data.values || [];
-  const headers = rows[0];
+  const headers = rows[0]?.map(h => h.toLowerCase().trim()) || [];
 
   const symbolCol = headers.indexOf("symbol");
   const cmpCol = headers.indexOf("cmp");
   const lcpCol = headers.indexOf("lcp");
+
+  if (symbolCol === -1 || cmpCol === -1 || lcpCol === -1) {
+    console.log("❌ Missing required headers (symbol, cmp, or lcp) in row 1.");
+    console.log("Current headers found:", rows[0]);
+    return;
+  }
 
   const requests = [];
 
@@ -94,7 +148,7 @@ async function updateSheet(indexData) {
     const symbol = row[symbolCol]?.trim().toUpperCase();
 
     if (indexData[symbol]) {
-      console.log(`🔧 Updating ${symbol} at row ${rowIndex + 1}`);
+      console.log(`🔧 Match found! Updating ${symbol} at row ${rowIndex + 1}`);
 
       requests.push({
         updateCells: {
