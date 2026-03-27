@@ -17,13 +17,23 @@ app.get("/health", (req, res) => {
   res.status(200).json({ status: "ok" });
 });
 
-// Manual trigger endpoint
+// Manual trigger endpoint (POST)
 app.post("/restart", (req, res) => {
   exec("node updateIndices.js", (err, stdout, stderr) => {
     if (err) return res.status(500).json({ message: err.message });
     if (stderr) console.warn("⚠ WARN:", stderr);
     return res.json({ message: "Indices script executed", output: stdout });
   });
+});
+
+// Manual trigger endpoint (GET) for cron-job.org
+app.get("/trigger", (req, res) => {
+  if (isMarketOpen()) {
+    runJobWithRetry();
+    return res.json({ message: "Manual trigger: Indices job started" });
+  } else {
+    return res.json({ message: "Manual trigger: Market is CLOSED" });
+  }
 });
 
 // Run job immediately after server starts (5s delay)
@@ -36,8 +46,8 @@ setTimeout(() => {
   }
 }, 5000);
 
-// Schedule every 15 minutes
-cron.schedule("*/15 * * * *", () => {
+// Schedule every 5 minutes
+cron.schedule("*/5 * * * *", () => {
   console.log("⏳ Cron triggered at:", new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
   if (isMarketOpen()) {
     runJobWithRetry();
