@@ -88,6 +88,7 @@ async function fetchIndices() {
     }
 
     console.log("📦 Data fetched successfully.");
+    console.log("📊 Fetched Values:", JSON.stringify(output, null, 2));
     return output;
   } catch (err) {
     console.error("❌ Error fetching NSE:", err.message);
@@ -149,6 +150,7 @@ async function updateSheet(indexData) {
 
     if (indexData[symbol]) {
       console.log(`🔧 Match found! Updating ${symbol} at row ${rowIndex + 1}`);
+      console.log(`📈 New Values: CMP=${indexData[symbol].cmp}, LCP=${indexData[symbol].lcp}`);
 
       requests.push({
         updateCells: {
@@ -216,6 +218,3 @@ async function runJob() {
 
 // Run immediately
 runJob();
-
-// Run every 300 seconds
-setInterval(runJob, 300000);
