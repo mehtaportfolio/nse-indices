@@ -50,7 +50,8 @@ async function fetchIndices() {
 
     // 1. Visit homepage to get initial cookies
     await client.get(BASE_URL, { headers });
-    console.log("✅ Homepage visited.");
+    console.log("✅ Homepage visited. Waiting 1s...");
+    await new Promise((resolve) => setTimeout(resolve, 1000));
 
     // 2. Visit market page to solidify session
     await client.get(MARKET_PAGE, {
