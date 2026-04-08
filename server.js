@@ -58,7 +58,28 @@ cron.schedule("*/5 * * * *", () => {
 
 // Market Hours Check (IST: 9:15 AM - 3:30 PM, Mon-Fri)
 function isMarketOpen() {
-  return true; // Bypass for testing
+  const now = new Date();
+  const istTime = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Kolkata",
+    hour: "numeric",
+    minute: "numeric",
+    hour12: false,
+    weekday: "long",
+  }).formatToParts(now);
+
+  const parts = {};
+  istTime.forEach(({ type, value }) => (parts[type] = value));
+
+  const day = parts.weekday;
+  const hour = parseInt(parts.hour);
+  const minute = parseInt(parts.minute);
+
+  const isWeekday = !["Saturday", "Sunday"].includes(day);
+  const totalMinutes = hour * 60 + minute;
+  const startMinutes = 9 * 60 + 15; // 09:15
+  const endMinutes = 15 * 60 + 30;  // 15:30
+
+  return isWeekday && totalMinutes >= startMinutes && totalMinutes <= endMinutes;
 }
 
 // Retry-enabled job execution
