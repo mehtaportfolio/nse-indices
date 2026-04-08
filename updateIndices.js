@@ -46,15 +46,13 @@ async function fetchIndices() {
   };
 
   try {
-    console.log("📡 Initializing session with NSE...");
-
-    // 1. Visit homepage to get initial cookies
-    await client.get(BASE_URL, { headers });
-    console.log("✅ Homepage visited. Waiting 1s...");
+    console.log("📡 Step 1: Visiting NSE Homepage...");
+    const homeRes = await client.get(BASE_URL, { headers });
+    console.log(`✅ Homepage: ${homeRes.status}. Waiting 1s...`);
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
-    // 2. Visit market page to solidify session
-    await client.get(MARKET_PAGE, {
+    console.log("📡 Step 2: Visiting Market Page...");
+    const marketRes = await client.get(MARKET_PAGE, {
       headers: {
         ...headers,
         Referer: BASE_URL,
@@ -63,10 +61,10 @@ async function fetchIndices() {
         "Sec-Fetch-Dest": "document"
       },
     });
-    console.log("✅ Market page visited. Waiting 2s...");
+    console.log(`✅ Market Page: ${marketRes.status}. Waiting 2s...`);
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
-    // 3. Fetch API with full cookie jar
+    console.log("📡 Step 3: Fetching Indices API...");
     const res = await client.get(API_URL, {
       headers: {
         ...headers,
@@ -76,6 +74,7 @@ async function fetchIndices() {
         "Sec-Fetch-Dest": "empty"
       },
     });
+    console.log(`✅ API Status: ${res.status}`);
 
     const output = {};
 
