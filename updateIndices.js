@@ -1,11 +1,8 @@
+require("dotenv").config();
 const { google } = require("googleapis");
 const axios = require("axios");
 const { wrapper } = require("axios-cookiejar-support");
 const { CookieJar } = require("tough-cookie");
-require("dotenv").config();
-
-const jar = new CookieJar();
-const client = wrapper(axios.create({ jar }));
 
 console.log("⏳ NSE Index Updater (Lightweight NSE) Loaded...");
 
@@ -27,39 +24,42 @@ const sheets = google.sheets({ version: "v4", auth });
 
 // ------- Fetch NSE ------
 async function fetchIndices() {
+  const jar = new CookieJar();
+  const client = wrapper(axios.create({ jar }));
+
   const BASE_URL = "https://www.nseindia.com";
   const MARKET_PAGE = "https://www.nseindia.com/market-data/live-market-indices";
   const API_URL = "https://www.nseindia.com/api/allIndices";
 
-  const HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+  const headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
     "Accept-Language": "en-US,en;q=0.9",
     "Accept-Encoding": "gzip, deflate, br",
     "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1",
+    "Host": "www.nseindia.com",
     "Sec-Fetch-Dest": "document",
     "Sec-Fetch-Mode": "navigate",
     "Sec-Fetch-Site": "none",
     "Sec-Fetch-User": "?1",
-    "sec-ch-ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
-    "sec-ch-ua-mobile": "?0",
-    "sec-ch-ua-platform": '"Windows"',
+    "Upgrade-Insecure-Requests": "1"
   };
 
   try {
     console.log("📡 Initializing session with NSE...");
 
     // 1. Visit homepage to get initial cookies
-    await client.get(BASE_URL, { headers: HEADERS });
+    await client.get(BASE_URL, { headers });
     console.log("✅ Homepage visited.");
 
     // 2. Visit market page to solidify session
     await client.get(MARKET_PAGE, {
       headers: {
-        ...HEADERS,
-        "Referer": BASE_URL,
+        ...headers,
+        Referer: BASE_URL,
         "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Dest": "document"
       },
     });
     console.log("✅ Market page visited. Waiting 2s...");
@@ -68,13 +68,11 @@ async function fetchIndices() {
     // 3. Fetch API with full cookie jar
     const res = await client.get(API_URL, {
       headers: {
-        ...HEADERS,
-        "Accept": "application/json, text/plain, */*",
-        "Referer": MARKET_PAGE,
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
+        ...headers,
+        Referer: MARKET_PAGE,
         "Sec-Fetch-Site": "same-origin",
-        "X-Requested-With": "XMLHttpRequest",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Dest": "empty"
       },
     });
 
